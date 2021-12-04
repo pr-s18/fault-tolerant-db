@@ -1,18 +1,24 @@
 package server.faulttolerance;
 
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.Session;
 import edu.umass.cs.gigapaxos.interfaces.Replicable;
 import edu.umass.cs.gigapaxos.interfaces.Request;
+import edu.umass.cs.gigapaxos.paxospackets.RequestPacket;
 import edu.umass.cs.nio.interfaces.IntegerPacketType;
 import edu.umass.cs.nio.interfaces.NodeConfig;
 import edu.umass.cs.nio.nioutils.NIOHeader;
 import edu.umass.cs.nio.nioutils.NodeConfigUtils;
 import edu.umass.cs.reconfiguration.reconfigurationutils.RequestParseException;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * This class should implement your {@link Replicable} database app if you wish
@@ -47,6 +53,15 @@ public class MyDBReplicableAppGP implements Replicable {
 	 * is not necessarily better, so don't sweat speed. Focus on safety.
 	 */
 	public static final int SLEEP = 1000;
+	protected Session session;
+	protected int requests;
+	private String keyspace;
+
+
+	private void setupCassandra(String keyspace) {
+		Cluster cluster = Cluster.builder().addContactPoint("127.0.0.1").build();
+		session = cluster.connect(keyspace);
+	}
 
 	/**
 	 * All Gigapaxos apps must either support a no-args constructor or a
@@ -61,7 +76,10 @@ public class MyDBReplicableAppGP implements Replicable {
 	 */
 	public MyDBReplicableAppGP(String[] args) throws IOException {
 		// TODO: setup connection to the data store and keyspace
-		throw new RuntimeException("Not yet implemented");
+//		throw new RuntimeException("Not yet implemented");
+		keyspace = args[0];
+		setupCassandra(args[0]);
+		requests = 0;
 	}
 
 	/**
@@ -77,8 +95,9 @@ public class MyDBReplicableAppGP implements Replicable {
 	 */
 	@Override
 	public boolean execute(Request request, boolean b) {
-		// TODO: submit request to data store
-		throw new RuntimeException("Not yet implemented");
+//		System.out.println("in bool exec");
+		return execute(request);
+//		throw new RntimeException("Not yet implemented");
 	}
 
 	/**
@@ -91,7 +110,21 @@ public class MyDBReplicableAppGP implements Replicable {
 	@Override
 	public boolean execute(Request request) {
 		// TODO: execute the request by sending it to the data store
-		throw new RuntimeException("Not yet implemented");
+//		System.out.println("in exec");
+		String requestValue = ((RequestPacket) request).getRequestValue();
+		String query = "";
+		// deserialize request
+		try {
+			JSONObject jsonRequest = new JSONObject(requestValue);
+			query = jsonRequest.getString("QV");
+			requests++;
+		} catch (JSONException e) {
+			e.printStackTrace();
+		}
+		// execute query
+		ResultSet resultSet = session.execute(query);
+		return resultSet.one() != null;
+//		throw new RuntimeException("Not yet implemented");
 	}
 
 	/**
@@ -103,7 +136,20 @@ public class MyDBReplicableAppGP implements Replicable {
 	@Override
 	public String checkpoint(String s) {
 		// TODO:
-		throw new RuntimeException("Not yet implemented");
+		int random = ThreadLocalRandom.current().nextInt();
+		// using the copy command of cqlsh to take a snapshot of the cassandra table to be able to restore at a later point
+		String filename = "abcd" + random + ".csv";
+		System.out.println("helloe world checkpoint + "  + filename + " on " + keyspace);
+		String query = "COPY " + keyspace + ".grade TO '" + filename + "' WITH HEADER = TRUE ;";
+		Runtime runtime = Runtime.getRuntime();
+		String[] commands = {"/System/Volumes/Data/opt/homebrew/bin/cqlsh", "-e", query};
+		try {
+			Process process = runtime.exec(commands);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+//		throw new RuntimeException("Not yet implemented");
+		return filename;
 	}
 
 	/**
@@ -116,8 +162,22 @@ public class MyDBReplicableAppGP implements Replicable {
 	@Override
 	public boolean restore(String s, String s1) {
 		// TODO:
-		throw new RuntimeException("Not yet implemented");
-
+		System.out.println("helloe world restore: " + s + ", " + s1);
+		// using the copy from command of cqlsh to restore the table from a checkpointed state
+		if(!s1.equals("{}")){
+			String query = "COPY " + keyspace + ".grade FROM '" + s1 + "' WITH HEADER = TRUE ;";
+			System.out.println(query);
+			Runtime runtime = Runtime.getRuntime();
+			String[] commands = {"/System/Volumes/Data/opt/homebrew/bin/cqlsh", "-e", query};
+			try {
+				Process process = runtime.exec(commands);
+//				return process.exitValue() == 0;
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+//		throw new RuntimeException("Not yet implemented");
+		return true;
 	}
 
 
@@ -148,3 +208,4 @@ public class MyDBReplicableAppGP implements Replicable {
 		return new HashSet<IntegerPacketType>();
 	}
 }
+
